@@ -1,18 +1,32 @@
 #!/bin/bash
 
-find /mnt/usb* -type f | while read f
+# Find all files with most recently modified first
+find /mnt/usb* -type f | while read file_path
 do
-   currenttime=$(date +%H:%M)
-   if [[ "$currenttime" > "23:00" ]] || [[ "$currenttime" < "10:00" ]]; then
-       echo "Copy '$f'"
-       #FILE=`echo $f | sed -e 's/ /\\\\ /g' -e 's/-/\\\\-/g'`
-       CACHE=`echo '$f' | md5sum | cut -d ' ' -f 1`
-       #s3cmd -rv --cache-file=/home/pi/.s3md5/$CACHE sync "'$f'" s3://infuse-videos
-       #find "$f" -type f -exec s3cmd -rv --no-delete-removed  --cache-file=/home/pi/.s3md5/$CACHE sync "{}" s3://infuse-videos  \;
-       find "$f" -type f -exec s3cmd -rv --no-delete-removed  --no-check-md5 sync "{}" s3://infuse-videos  \;
-    else
-       echo "Can only copy between 2300 and 0600 hours"
-       exit
-    fi
-done
 
+   current_hour=$(date +%-H)
+   bucket_name="infuse-videos"
+
+   if [[ "$current_hour" -ge  22  || "$current_hour" -lt 7 ]]; then
+
+       file_name=$(basename "$file_path")
+       existing_file=$(aws s3 ls "s3://$bucket_name/$file_name" 2>&1)
+
+       if [[ $existing_file == *"NoSuchKey"* ]]; then
+           local_size=$(wc -c < "$file_path")
+           s3_size=$(aws s3 ls "s3://$bucket_name/$file_name" | awk '{print $3}')
+
+           if [[ "$local_size" -eq "$s3_size" ]]; then
+               aws s3 cp "$file_path" "s3://$bucket_name/"
+               echo "File uploaded successfully."
+           else
+               echo "File exists in S3 but sizes don't match. Skipping upload."
+           fi
+       else
+           echo "File already exists in S3. Skipping upload."
+       fi
+   else
+       echo "Upload restricted to the specified time window (11 pm - 6 am)."
+       break
+   fi
+done

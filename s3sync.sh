@@ -1,29 +1,34 @@
 #!/bin/bash
 
+bucket_name="infuse-videos"
+aws s3 ls "s3://$bucket_name" > dir.txt
+
 # Find all files with most recently modified first
 find /mnt/usb* -type f | while read file_path
 do
 
    current_hour=$(date +%-H)
-   bucket_name="infuse-videos"
 
-   if [[ "$current_hour" -ge  22  || "$current_hour" -lt 7 ]]; then
+   if [[ "$current_hour" -ge  22  || "$current_hour" -lt 9 ]]; then
 
        file_name=$(basename "$file_path")
-       existing_file=$(aws s3 ls "s3://$bucket_name/$file_name" 2>&1)
+       existing_file=$(egrep "[0-9]+ $file_name\$" dir.txt 2>&1)
 
-       if [[ $existing_file == *"NoSuchKey"* ]]; then
+       # if found
+       if [[ "$existing_file" != "" ]]; then
            local_size=$(wc -c < "$file_path")
-           s3_size=$(aws s3 ls "s3://$bucket_name/$file_name" | awk '{print $3}')
+           s3_size=$(echo $existing_file | awk '{print $3}')
 
-           if [[ "$local_size" -eq "$s3_size" ]]; then
+           # If different size
+           if [[ "$local_size" -ne "$s3_size" ]]; then
+               echo "Different size Uploading."
                aws s3 cp "$file_path" "s3://$bucket_name/"
-               echo "File uploaded successfully."
            else
-               echo "File exists in S3 but sizes don't match. Skipping upload."
+               echo "File exists in S3 but sizes match. Skipping upload."
            fi
        else
-           echo "File already exists in S3. Skipping upload."
+           echo "File missing in S3. Uploading."
+           aws s3 cp "$file_path" "s3://$bucket_name/"
        fi
    else
        echo "Upload restricted to the specified time window (11 pm - 6 am)."
